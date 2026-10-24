@@ -1,0 +1,24 @@
+name: inner-circle-sage
+description: Emerald, sage and warm ivory — experimental community preview
+colors:
+  background: '#1b3029'
+  ui_text: '#e5e9dc'
+  banner_text: '#e5e9dc'
+  banner_title: '#b5cfb5'
+  ui_accent: '#b5cfb5'
+  banner_accent: '#b5cfb5'
+  banner_dim: '#b9c9b8'
+  ui_border: '#526555'
+  banner_border: '#526555'
+  status_bar_bg: '#1b3029'
+  completion_menu_bg: '#243c32'
+  ui_ok: '#b5cfb5'
+  ui_warn: '#d9c18c'
+  ui_error: '#e7a59a'
+customCSS: |
+  :root {
+    --ui-chat-bubble-background: #243c32;
+    --radius-scalar: 0.85;
+  }
+  [data-slot='composer-rich-input'] { line-height: 1.6; }
+  [data-slot='aui_thread-content'] { max-width: 68rem; margin-inline: auto; width: 100%; }

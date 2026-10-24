@@ -1,0 +1,12 @@
+Inner Circle Preview is an independent community experiment for Hermes Desktop.
+It is not affiliated with Nous Research or xAI.
+
+The visual treatment grew from Thomas Bekkers' Hermes Bot Kit (MIT):
+https://github.com/thomasbek3/hermes-bot-kit
+The applicable copyright and permission notice is retained in LICENSE.
+
+Hermes Desktop provides the SDK, native profiles, conversations and pane layout:
+https://github.com/NousResearch/hermes-agent
+
+The included demo uses original geometric SVG illustrations and synthetic text.
+It contains no production conversations, personal portraits or profile data.
