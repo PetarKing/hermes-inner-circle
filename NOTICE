@@ -8,5 +8,7 @@ The applicable copyright and permission notice is retained in LICENSE.
 Hermes Desktop provides the SDK, native profiles, conversations and pane layout:
 https://github.com/NousResearch/hermes-agent
 
-The included demo uses original geometric SVG illustrations and synthetic text.
-It contains no production conversations, personal portraits or profile data.
+The demo shows character profile artwork and folder labels from the customized
+setup, shared at the owner's request, with synthetic conversation text.
+It contains no production conversations, profile configuration or credentials.
+See demo/ASSETS.md for character portrait credits.

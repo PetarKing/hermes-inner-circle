@@ -3,7 +3,13 @@
 **Sharing for inspiration.** This is an early community design experiment for
 Hermes Desktop. If there is interest, we can polish it further together.
 
-![Illustrative sample conversation — fictional bots and text](demo/preview.svg)
+![Inner Circle setup showcase — profile artwork, folders and sample conversation](demo/overview.png)
+
+[Build & culture](demo/build-culture.png) · [Compact sidebar](demo/compact.png) · [Watch the 22-second demo](demo/inner-circle-demo.mp4)
+
+*The images show the customized setup, including its character portraits and
+native folders, with sample conversation text. Telegram/routine visuals show a
+private adapter; that adapter is not included in this public plugin.*
 
 An optional sage theme and desktop plugin, adapted from work with
 [Hermes Bot Kit](https://github.com/thomasbek3/hermes-bot-kit).
@@ -43,10 +49,12 @@ data needs to be deleted or restored.
 
 ## Demo and checks
 
-`demo/index.html` is an illustrative canvas demo with fictional bots and text.
+`demo/index.html` is a canvas showcase of the customized setup, with its profile
+artwork, bot names and native folders. Conversation text is sample data.
 Serve this folder locally, for example `python3 -m http.server 8766`, and open
 `http://127.0.0.1:8766/demo/`. It shows the gallery and compact layout; it is not
-a recording of a live model. Its SVG artwork is original to this preview.
+a recording of a live model. Its character portraits are AI-generated fan illustrations from the configured
+profiles; see [demo/ASSETS.md](demo/ASSETS.md).
 
 For the isolated tests, install the development dependency with `npm install`,
 then run `npm test`. The plugin has no runtime npm dependency or build step.
