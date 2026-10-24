@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { JSDOM } from 'jsdom'
 
 const source = fs.readFileSync(new URL('../plugin.js', import.meta.url), 'utf8')
-  .replace("import { PALETTE_AREA, host } from '@hermes/plugin-sdk'", 'const {PALETTE_AREA, host} = sdk')
+  .replace(/^import .* from '@hermes\/plugin-sdk'$/m, 'const {PALETTE_AREA, host, queryClient, coarseElapsed, translateNow} = sdk')
   .replace('export const CSS_TEXT', 'const CSS_TEXT')
   .replace(/export function /g, 'function ')
   .replace('export default {', 'globalThis.plugin = {')
@@ -89,7 +89,7 @@ test('the local proof uses read-only metadata; Sessions stays visible until expl
   assert.equal(document.querySelectorAll('[data-inner-circle-chat]').length,1)
   assert.equal(document.body.classList.contains('ic-hide-sessions'),false)
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{method:'profiles.list',params:{include_sessions:true}}])
-  commands[0].data.run()
+  commands.find(command => command.id === 'sessions').data.run()
   assert.equal(document.body.classList.contains('ic-hide-sessions'),true)
 })
 
