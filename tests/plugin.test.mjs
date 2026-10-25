@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { JSDOM } from 'jsdom'
 
 const source = fs.readFileSync(new URL('../plugin.js', import.meta.url), 'utf8')
-  .replace(/^import .* from '@hermes\/plugin-sdk'$/m, 'const {PALETTE_AREA, host, queryClient, coarseElapsed, translateNow} = sdk')
+  .replace(/^import .* from '@hermes\/plugin-sdk'$/m, 'const {PALETTE_AREA, THEMES_AREA, requestTheme, host, queryClient, coarseElapsed, translateNow} = sdk')
   .replace('export const CSS_TEXT', 'const CSS_TEXT')
   .replace(/export function /g, 'function ')
   .replace('export default {', 'globalThis.plugin = {')
@@ -58,6 +58,8 @@ test('header follows native avatar/name edits and treats names as inert text', (
   assert.equal(document.querySelector('main img').src,'new.svg')
   assert.equal(document.querySelector('main script'),null)
   assert.equal(document.querySelectorAll('[data-inner-circle-preview="profile-header"]').length,1)
+  hooks.paintChat(document,{...proof,role:'Research & planning'},state)
+  assert.equal(document.querySelector('.ic-profile-role').textContent,'Research & planning')
 })
 
 test('remote sources stay stock and do not trigger a local roster request', async () => {
@@ -80,17 +82,17 @@ test('a focus change fences an in-flight registry result', async () => {
   assert.equal(document.querySelectorAll('[data-inner-circle-chat]').length,0)
 })
 
-test('the local proof uses read-only metadata; Sessions stays visible until explicitly toggled', async () => {
+test('the preset uses read-only metadata; Sessions hides reversibly on enable', async () => {
   const calls=[]
   const {context,ctx,flush,document,commands}=setup({state:{focusedStoredSessionId:{get:()=> 'canonical'},connectionId:{get:()=>null}},
     connections:async()=>[{id:'local',kind:'local',primary:true}],request:async(method,params)=>{calls.push({method,params});return {profiles:[row]}}})
   context.plugin.register(ctx)
   await new Promise(r=>setImmediate(r));flush()
   assert.equal(document.querySelectorAll('[data-inner-circle-chat]').length,1)
-  assert.equal(document.body.classList.contains('ic-hide-sessions'),false)
+  assert.equal(document.body.classList.contains('ic-hide-sessions'),true)
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{method:'profiles.list',params:{include_sessions:true}}])
   commands.find(command => command.id === 'sessions').data.run()
-  assert.equal(document.body.classList.contains('ic-hide-sessions'),true)
+  assert.equal(document.body.classList.contains('ic-hide-sessions'),false)
 })
 
 test('disposal fences a late response and removes only owned presentation', async () => {

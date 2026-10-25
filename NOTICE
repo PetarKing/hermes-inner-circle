@@ -1,9 +1,11 @@
-Inner Circle Preview is an independent community experiment for Hermes Desktop.
+Inner Circle is a personal community preset for Hermes Desktop.
 It is not affiliated with Nous Research or xAI.
 
 The visual treatment grew from Thomas Bekkers' Hermes Bot Kit (MIT):
 https://github.com/thomasbek3/hermes-bot-kit
 The applicable copyright and permission notice is retained in LICENSE.
+Selected Bubble Mode and Task Dock sources are bundled from the reviewed
+revision; adaptations are described in vendor/README.md.
 
 Hermes Desktop provides the SDK, native profiles, conversations and pane layout:
 https://github.com/NousResearch/hermes-agent

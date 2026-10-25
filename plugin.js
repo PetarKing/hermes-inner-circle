@@ -1,4 +1,4 @@
-import { PALETTE_AREA, host, queryClient, coarseElapsed, translateNow } from '@hermes/plugin-sdk'
+import { PALETTE_AREA, THEMES_AREA, requestTheme, host, queryClient, coarseElapsed, translateNow } from '@hermes/plugin-sdk'
 
 export const CSS_TEXT = `
 body.inner-circle-preview { --ic-sage: #b5cfb5; --ic-stroke: color-mix(in srgb, var(--ui-text-primary) 12%, transparent); }
@@ -159,7 +159,7 @@ export function canonicalMatch(profiles, session, hint, connectionId) {
   if (matches.length !== 1 || !matches[0].name) return null
   const profile = matches[0].name
   if (hint && (hint.connectionId !== connectionId || hint.profile !== profile)) return null
-  return {profile, connectionId, session}
+  return {profile, connectionId, session, role: typeof matches[0].description === 'string' ? matches[0].description : ''}
 }
 
 export function paintChat(document, proof, state) {
@@ -172,10 +172,14 @@ export function paintChat(document, proof, state) {
         (anchor === 'workspace' && state.focused && state.focused === state.active))
     if (!belongs) {
       surface.removeAttribute(CHAT)
+      surface.removeAttribute('data-inner-circle-profile')
+      surface.removeAttribute('data-inner-circle-connection')
       surface.querySelector(`[${OWN}="profile-header"]`)?.remove()
       continue
     }
     surface.setAttribute(CHAT, '')
+    surface.setAttribute('data-inner-circle-profile', proof.profile)
+    surface.setAttribute('data-inner-circle-connection', proof.connectionId)
     const row = [...document.querySelectorAll('[data-slot="bots-roster"] [data-roster-key]')].find(el =>
       el.getAttribute('data-roster-key') === `${proof.connectionId}::${proof.profile}` ||
       (proof.connectionId === 'local' && el.getAttribute('data-roster-key') === `legacy::${proof.profile}`))
@@ -186,12 +190,21 @@ export function paintChat(document, proof, state) {
       header.setAttribute(OWN, 'profile-header')
       const label = document.createElement('div')
       label.className = 'ic-profile-name'
-      header.append(label)
+      const words = document.createElement('div')
+      words.append(label)
+      header.append(words)
       surface.prepend(header)
     }
     const name = (row.getAttribute('aria-label') || proof.profile).split(' · ')[0]
     const label = header.querySelector('.ic-profile-name')
     if (label.textContent !== name) label.textContent = name
+    let role = header.querySelector('.ic-profile-role')
+    if (proof.role) {
+      if (!role) { role = document.createElement('div'); role.className = 'ic-profile-role'; label.parentElement.append(role) }
+      const text = proof.role.length > 100 ? proof.role.slice(0, 100) + '…' : proof.role
+      if (role.textContent !== text) role.textContent = text
+      role.title = proof.role
+    } else role?.remove()
     const photo = row.querySelector('img')
     let portrait = header.querySelector('img')
     if (photo) {
@@ -402,8 +415,8 @@ export function createRosterControls(ctx) {
 }
 
 export default {
-  id: 'inner-circle-preview',
-  name: 'Inner Circle Preview',
+  id: 'inner-circle',
+  name: 'Inner Circle',
   description: 'Experimental sage chat styling and a responsive portrait roster.',
   defaultEnabled: false,
   register(ctx) {
@@ -411,7 +424,7 @@ export default {
     const read = atom => atom?.get?.()
     const session = () => read(host.state.focusedStoredSessionId)
     const connection = () => read(host.state.connectionId)
-    let hideSessions = ctx.storage.get('hideSessions', false)
+    let hideSessions = ctx.storage.get('hideSessions', true)
     const style = document.createElement('style')
     style.setAttribute(OWN, 'style')
     style.textContent = CSS_TEXT
@@ -425,6 +438,9 @@ export default {
       rosterControls.select(proof?.session === session() ? {connectionId: proof.connectionId, profile: proof.profile} : null)
       rosterControls.paint()
       paintChat(document, proof, {session: session(), focused: read(host.state.focusedSessionId), active: read(host.state.activeSessionId)})
+      const canonical = document.querySelector('[data-chat-surface][data-inner-circle-chat]') ? proof?.session : null
+      if (canonical && document.body.getAttribute('data-inner-circle-canonical') !== canonical) document.body.setAttribute('data-inner-circle-canonical', canonical)
+      if (!canonical) document.body.removeAttribute('data-inner-circle-canonical')
     }
     function schedule() { if (!disposed && !frame) frame = requestAnimationFrame(paint) }
     async function refresh() {
@@ -462,12 +478,18 @@ export default {
     if (queryClient?.getQueryCache) ctx.onDispose(queryClient.getQueryCache().subscribe(event => {
       if (event.query?.queryKey?.[0] === 'hermes-bots' && event.query.queryKey[1] === 'roster') schedule()
     }))
+    ctx.register({id: 'sage-theme', area: THEMES_AREA, data: {
+      name:'inner-circle-sage',label:'Inner Circle Sage',description:'Emerald, sage and warm ivory',
+      colors:{background:'#1b3029',foreground:'#e5e9dc',card:'#243c32',cardForeground:'#e5e9dc',muted:'#20382d',mutedForeground:'#b4c6b3',popover:'#243c32',popoverForeground:'#e5e9dc',primary:'#b5cfb5',primaryForeground:'#1b3029',secondary:'#29433d',secondaryForeground:'#e5e9dc',accent:'#354f3d',accentForeground:'#e5e9dc',border:'#526555',input:'#243c32',ring:'#b5cfb5',destructive:'#e7a59a',destructiveForeground:'#1b3029',sidebarBackground:'#182c25',sidebarBorder:'#354f3d',userBubble:'#355440'},
+      customCSS:':root { --ui-chat-bubble-background:#243c32; --radius-scalar:.85; }'
+    }})
+    ctx.register({id:'apply-sage',area:PALETTE_AREA,data:{id:'inner-circle.apply-sage',label:'Inner Circle: apply sage theme',run:()=>requestTheme('inner-circle-sage')}})
     ctx.register({id: 'roster-order', area: PALETTE_AREA, data: {
-      id: 'inner-circle-preview.roster-order', label: 'Inner Circle Preview: reset custom bot order',
+      id: 'inner-circle-preview.roster-order', label: 'Inner Circle: reset custom bot order',
       run: () => rosterControls.reset()
     }})
     ctx.register({id: 'sessions', area: PALETTE_AREA, data: {
-      id: 'inner-circle-preview.sessions', label: 'Inner Circle Preview: show or hide Sessions',
+      id: 'inner-circle-preview.sessions', label: 'Inner Circle: show or hide Sessions',
       run: () => {
         hideSessions = !hideSessions
         ctx.storage.set('hideSessions', hideSessions)
@@ -484,6 +506,10 @@ export default {
       document.querySelectorAll(`[${OWN}]`).forEach(el => el.remove())
       document.querySelectorAll(`[${CHAT}]`).forEach(el => el.removeAttribute(CHAT))
       document.body.classList.remove('inner-circle-preview', 'ic-hide-sessions')
+      document.body.removeAttribute('data-inner-circle-canonical')
+      document.querySelectorAll('[data-inner-circle-profile],[data-inner-circle-connection]').forEach(el => {
+        el.removeAttribute('data-inner-circle-profile');el.removeAttribute('data-inner-circle-connection')
+      })
     })
     void refresh()
   }

@@ -1,0 +1,6 @@
+name: inner-circle
+label: Inner Circle
+description: Personal bot-centric Hermes Desktop preset with sage chat, portraits and folded activity.
+version: 0.3.0
+manifest_version: 1
+requires_hermes: ">=0.22.5"
