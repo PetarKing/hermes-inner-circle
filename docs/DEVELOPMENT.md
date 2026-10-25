@@ -50,9 +50,9 @@ and observers for the gallery, quiet work and inline activity. Its `desktop
 surface` validation therefore fails; security scanning is a separate check.
 We do not evade the rule or claim listing/endorsement.
 
-The supported next step is an SDK extension request with this concrete consumer:
-roster presentation/selection, scoped conversation decorations, typed activity
-and channel metadata, and reversible Sessions visibility. A future website
+[SDK request #144372](https://github.com/NousResearch/hermes-agent/issues/144372)
+describes the concrete roster and scoped-message consumers needed to replace
+the DOM dependencies. A future website
 listing would be **community**, subject to maintainer review. Only Nous-maintained
 plugins have the official tier. Catalog support needs those hooks and clean
 native acceptance, not a differently named bundle.
