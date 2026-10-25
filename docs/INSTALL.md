@@ -44,6 +44,12 @@ visible text matches remain undecorated. Channel labels require the documented
 evidence fields. The optional adapter inbox is **off by default** and never reads
 anything until enabled; see [INTEGRATIONS.md](INTEGRATIONS.md).
 
+## Sidebar unread behaviour
+
+The preset displays native unread state. Suppressing internal bot/routine activity
+requires the separate [Hermes source fix](NOTIFICATIONS.md); the plugin installer
+and plugin updates do not apply it.
+
 ## Update
 
 Use `hermes plugins update inner-circle`. Back up your installed source before

@@ -1,0 +1,553 @@
+diff --git a/apps/desktop/src/plugins/hermes-bots/hidden-bots.test.ts b/apps/desktop/src/plugins/hermes-bots/hidden-bots.test.ts
+index ad02b40052..fb7407f9ef 100644
+--- a/apps/desktop/src/plugins/hermes-bots/hidden-bots.test.ts
++++ b/apps/desktop/src/plugins/hermes-bots/hidden-bots.test.ts
+@@ -31,6 +31,7 @@ vi.mock('@hermes/plugin-sdk', async importOriginal => {
+ 
+   return {
+     ...sdk,
++    noteRosterReplySession: vi.fn(),
+     ackStoredSessionId: vi.fn(),
+     host: { ...sdk.host, notify, request },
+     markSessionUnreadFinished
+@@ -219,7 +220,12 @@ describe('a hidden bot stays quiet without going deaf', () => {
+     const rosterAt = (at: number) =>
+       [
+         {
+-          canonical_session: { id: 'ghost-chat', last_active: at, preview: 'Message from writer: hi' },
++          canonical_session: {
++            id: 'ghost-chat',
++            last_active: at,
++            notification_at: at,
++            preview: 'Message from writer: hi'
++          },
+           name: 'ghost'
+         }
+       ] as unknown as RosterRow[]
+diff --git a/apps/desktop/src/plugins/hermes-bots/roster-actions.test.ts b/apps/desktop/src/plugins/hermes-bots/roster-actions.test.ts
+index 6a7d347b74..4745bda06f 100644
+--- a/apps/desktop/src/plugins/hermes-bots/roster-actions.test.ts
++++ b/apps/desktop/src/plugins/hermes-bots/roster-actions.test.ts
+@@ -32,6 +32,7 @@ vi.mock('@hermes/plugin-sdk', async () => {
+   const { atom } = await import('nanostores')
+ 
+   return {
++    noteRosterReplySession: vi.fn(),
+     ackStoredSessionId: vi.fn(),
+     atom,
+     haptic: vi.fn(),
+@@ -70,7 +71,16 @@ vi.mock('./group-panes', () => ({ closeGroupChatMainTab: vi.fn() }))
+ /** A bot whose canonical Bot Chat carries the activity — the only shape that
+  *  can be marked unread, since the marker is keyed by canonical session id. */
+ const chatting = (name: string, lastActive: number, preview = 'hello'): RosterRow =>
+-  ({ canonical_session: { id: `${name}-chat`, last_active: lastActive, preview }, name }) as RosterRow
++  ({
++    canonical_session: {
++      id: `${name}-chat`,
++      last_active: lastActive,
++      notification_at: lastActive,
++      notification_preview: preview,
++      preview
++    },
++    name
++  }) as RosterRow
+ 
+ async function loadActions() {
+   vi.resetModules()
+@@ -198,7 +208,13 @@ describe('new activity after the seed', () => {
+ 
+     const withStaleVisible = (lastActive: number) =>
+       ({
+-        canonical_session: { id: 'dm', last_active: lastActive, preview: 'ping' },
++        canonical_session: {
++          id: 'dm',
++          last_active: lastActive,
++          notification_at: lastActive,
++          notification_preview: 'ping',
++          preview: 'ping'
++        },
+         last_session: { id: 'scratch', last_active: 10 },
+         name: 'dixie'
+       }) as RosterRow
+@@ -214,7 +230,7 @@ describe('new activity after the seed', () => {
+ 
+     const scoped = (connectionId: string, lastActive: number) =>
+       ({
+-        canonical_session: { id: `${connectionId}-chat`, last_active: lastActive },
++        canonical_session: { id: `${connectionId}-chat`, last_active: lastActive, notification_at: lastActive },
+         connectionId,
+         name: 'default',
+         route: { connectionId, mode: 'remote', profile: 'default', targetProfile: 'default' },
+@@ -243,3 +259,27 @@ describe('the toast preference', () => {
+     expect($activityToasts.get()).toBe(false)
+   })
+ })
++
++it('keeps cleared replies quiet across internal activity and unrelated sessions', async () => {
++  const { trackInboundActivity, $selectedBot } = await loadActions()
++  const bot = chatting('quiet', 100)
++  trackInboundActivity([bot])
++  const human = chatting('quiet', 200)
++  trackInboundActivity([human])
++  expect(markUnreadMock).toHaveBeenCalledTimes(1)
++  $selectedBot.set('quiet')
++  trackInboundActivity([human])
++  $selectedBot.set('other')
++  markUnreadMock.mockClear()
++  trackInboundActivity([
++    {
++      ...human,
++      canonical_session: { ...human.canonical_session, last_active: 300 },
++      last_session: { id: 'routine-worker', last_active: 500, preview: 'routine done' }
++    }
++  ])
++  trackInboundActivity([{ ...human, canonical_session: { ...human.canonical_session, last_active: 400 } }])
++  expect(markUnreadMock).not.toHaveBeenCalled()
++  trackInboundActivity([chatting('quiet', 600)])
++  expect(markUnreadMock).toHaveBeenCalledTimes(1)
++})
+diff --git a/apps/desktop/src/plugins/hermes-bots/roster-actions.ts b/apps/desktop/src/plugins/hermes-bots/roster-actions.ts
+index ab189ac5d2..2c84e93df5 100644
+--- a/apps/desktop/src/plugins/hermes-bots/roster-actions.ts
++++ b/apps/desktop/src/plugins/hermes-bots/roster-actions.ts
+@@ -8,7 +8,14 @@
+  * them can own an action the others call without importing a sibling surface.
+  */
+ 
+-import { ackStoredSessionId, atom, haptic, host, markSessionUnreadFinished } from '@hermes/plugin-sdk'
++import {
++  ackStoredSessionId,
++  atom,
++  haptic,
++  host,
++  markSessionUnreadFinished,
++  noteRosterReplySession
++} from '@hermes/plugin-sdk'
+ 
+ import {
+   $openBotChat,
+@@ -19,7 +26,7 @@ import {
+   saveSelectedRosterBot
+ } from './bot-state'
+ import { isStaleBotChatTile, notifyBotOpenFailure, openBotCanonicalChat, prepareBotSource } from './canonical-chat'
+-import { $botMeta, botActivitySession, botRosterKey, botSelectionKey, newBotChat } from './data'
++import { $botMeta, botRosterKey, botSelectionKey, newBotChat } from './data'
+ import { $groupChats, $groupChatWorkspace } from './group-chat'
+ import { openGroupChat } from './group-chat-view'
+ import { liveGroupChatNames } from './group-membership'
+@@ -33,6 +40,7 @@ import type { RosterRow } from './types'
+ // last_active watermark per source-qualified bot, seeded on first poll so a
+ // fresh mount doesn't mark ancient history unread.
+ let watermarksSeeded = false
++const replyWatermarks = new Map<string, number>()
+ 
+ /** User pref: toast on every new bot activity. Default OFF — a busy roster
+  *  (cron runs, bot-to-bot chatter) turns the toasts into a firehose, and the
+@@ -50,28 +58,31 @@ export function setActivityToasts(enabled: boolean) {
+   }
+ }
+ 
+-/** Detect new inbound activity from a fresh roster: last_active moved past
+- *  the watermark for a bot whose chat isn't on screen -> unread + toast.
+- *  Watermarks follow botActivitySession (canonical Bot Chat included) —
+- *  last_session alone never sees the hidden Bot Chat, so DMs delivered
+- *  there would neither badge nor toast.
+- *
+- *  This poll is the ONLY unread signal a canonical Bot Chat can have: it is
+- *  unconditionally hidden, so it never reaches the session list the backend's
+- *  own unread watermark iterates, and deliveries from the CLI, cron, another
+- *  bot, or another machine never touch this window's live turn edge either. */
++/** Refresh the open canonical transcript on activity, but badge only new human replies.
++ * The gateway derives notification_at from stored turn provenance; worker sessions,
++ * liveness timestamps and internal records cannot re-arm a cleared notification. */
+ export function trackInboundActivity(roster: RosterRow[]) {
+   const seeding = !watermarksSeeded
+   watermarksSeeded = true
+ 
+   for (const bot of roster) {
+     const key = botSelectionKey(bot)
+-    const activity = botActivitySession(bot)
++    const activity = bot.canonical_session
++
++    if (activity?.notification_at !== undefined) {
++      for (const id of [activity.id, activity.resolved_id]) {
++        if (id) {noteRosterReplySession(id, bot.name)}
++      }
++    }
++
++    const replyAt = activity?.notification_at ?? 0
++    const previousReply = replyWatermarks.get(key)
++    replyWatermarks.set(key, Math.max(previousReply ?? 0, replyAt))
+     const ts = activity?.last_active || 0
+     const prev = rosterWatermarks.get(key) || 0
+     rosterWatermarks.set(key, Math.max(prev, ts))
+ 
+-    if (seeding || ts <= prev) {
++    if (seeding) {
+       // Seed (or refresh) the last-toasted preview so a fresh mount, or a row
+       // whose activity hasn't advanced, treats current content as already-seen
+       // rather than replaying it — or a busy bridge's unchanged preview — as a
+@@ -84,8 +95,16 @@ export function trackInboundActivity(roster: RosterRow[]) {
+     // Activity in the exact bot owner the user is currently looking at is
+     // already visible — never badge the open chat or its same-named twin.
+     if ($selectedBot.get() === key) {
+-      refreshOpenBotChat(bot)
++      if (ts > prev) {
++        refreshOpenBotChat(bot)
++      }
++
++      continue
++    }
+ 
++    // Only a new human-facing reply can notify. last_active also moves on heartbeats,
++    // routine notes and peer turns; it remains useful for refreshing the open transcript.
++    if (previousReply === undefined || replyAt <= previousReply) {
+       continue
+     }
+ 
+@@ -106,7 +125,7 @@ export function trackInboundActivity(roster: RosterRow[]) {
+ 
+     // Toasts are opt-in: the unread mark is recorded above regardless, but the
+     // per-message notification fires only when the user enabled it.
+-    const preview = (activity?.preview || '').trim()
++    const preview = (activity?.notification_preview || '').trim()
+ 
+     // Content-level dedup, tracked independently of the toast pref so the
+     // memory stays accurate whether or not toasts are on: skip re-surfacing an
+@@ -239,6 +258,10 @@ export async function openRosterBot(bot: RosterRow): Promise<boolean> {
+       }
+     : null
+ 
++  replyWatermarks.set(
++    botSelectionKey(bot),
++    Math.max(replyWatermarks.get(botSelectionKey(bot)) ?? 0, bot.canonical_session?.notification_at ?? 0)
++  )
+   haptic('tap')
+   saveSelectedRosterBot(bot)
+   setBotsWorkspaceOwner(botWorkspaceOwnerKey(bot), bot)
+diff --git a/apps/desktop/src/plugins/hermes-bots/types.ts b/apps/desktop/src/plugins/hermes-bots/types.ts
+index 860445748c..19bc762df1 100644
+--- a/apps/desktop/src/plugins/hermes-bots/types.ts
++++ b/apps/desktop/src/plugins/hermes-bots/types.ts
+@@ -44,6 +44,8 @@ export interface CanonicalSession {
+   /** Compression-lineage tip — the live session a durable id currently maps to. */
+   resolved_id?: string
+   last_active?: number
++  notification_at?: number
++  notification_preview?: string
+   preview?: string
+   root_title?: string
+   title?: string
+diff --git a/apps/desktop/src/sdk/index.ts b/apps/desktop/src/sdk/index.ts
+index 1771079ce6..b8a7bdcc7f 100644
+--- a/apps/desktop/src/sdk/index.ts
++++ b/apps/desktop/src/sdk/index.ts
+@@ -1937,7 +1937,12 @@ export { gatewayActivationEpoch } from '@/store/gateway'
+  *  the user opens the session, `forgetSessionUnread` drops it when the session
+  *  is gone. Pass the owning profile — a hidden session has no row to read it
+  *  from, and the persisted half is bucketed per profile. */
+-export { ackStoredSessionId, forgetSessionUnread, markSessionUnreadFinished } from '@/store/session-unread'
++export {
++  ackStoredSessionId,
++  forgetSessionUnread,
++  markSessionUnreadFinished,
++  noteRosterReplySession
++} from '@/store/session-unread'
+ /** `sidebarNav.prefs`: hide / re-order the sidebar's nav rows by CONTRIBUTING a
+  *  preference (union of hides, `capabilities` never hidden; the first order
+  *  in registry area order — lowest `order`, then registration — wins). A
+diff --git a/apps/desktop/src/store/session-states-eviction.test.ts b/apps/desktop/src/store/session-states-eviction.test.ts
+index 5ec4efe2d5..069db41ab2 100644
+--- a/apps/desktop/src/store/session-states-eviction.test.ts
++++ b/apps/desktop/src/store/session-states-eviction.test.ts
+@@ -18,6 +18,8 @@ import {
+ } from '@/store/session-states'
+ import { makeSessionInfo } from '@/test/session-info'
+ 
++import { markSessionUnreadFinished, noteRosterReplySession } from './session-unread'
++
+ /**
+  * The closed-tile leak: gateway events keep publishing for sessions whose
+  * surface is gone, and every parked transcript taxes every later publish (map
+@@ -208,3 +210,13 @@ describe('closeSessionTile eviction', () => {
+     expect($sessionStates.get()['rt-1']).toMatchObject({ storedSessionId: 'stored-1', busy: false })
+   })
+ })
++
++it('lets the reply poll own Bot Chat unread instead of an internal busy edge', () => {
++  noteRosterReplySession('quiet-bot', 'ops')
++  recordSessionEventScope({ connectionId: 'local', profile: 'ops', session_id: 'rt-quiet-bot' })
++  publishSessionState('rt-quiet-bot', state('quiet-bot', { busy: true }))
++  publishSessionState('rt-quiet-bot', state('quiet-bot', { busy: false }))
++  expect($unreadFinishedSessionIds.get()).not.toContain('quiet-bot')
++  markSessionUnreadFinished('quiet-bot', 'ops')
++  expect($unreadFinishedSessionIds.get()).toContain('quiet-bot')
++})
+diff --git a/apps/desktop/src/store/session-states.ts b/apps/desktop/src/store/session-states.ts
+index c5b38a21bc..1bdca691e3 100644
+--- a/apps/desktop/src/store/session-states.ts
++++ b/apps/desktop/src/store/session-states.ts
+@@ -93,7 +93,12 @@ import {
+   type SessionOwnerScope,
+   type SessionProfileRoute
+ } from './session-request-router'
+-import { ackStoredSessionId, isMessagingCompletion, markSessionUnreadFinished } from './session-unread'
++import {
++  ackStoredSessionId,
++  isMessagingCompletion,
++  isRosterReplySession,
++  markSessionUnreadFinished
++} from './session-unread'
+ import { migrateTranscriptTailsForProfile } from './transcript-tail-cache'
+ import { isBrowserWindow, isSecondaryWindow } from './windows'
+ 
+@@ -778,7 +783,11 @@ function lightUnreadCompletion(storedId: string, runtimeId?: string) {
+ 
+   // FOCUSED, not selected: a session finishing in the tile the user is
+   // watching is already seen, and a tile is never the primary selection.
+-  if (storedId === $focusedStoredSessionId.get() || isMessagingCompletion(storedId, profileHint)) {
++  if (
++    storedId === $focusedStoredSessionId.get() ||
++    isMessagingCompletion(storedId, profileHint) ||
++    isRosterReplySession(storedId, profileHint)
++  ) {
+     return
+   }
+ 
+diff --git a/apps/desktop/src/store/session-unread.ts b/apps/desktop/src/store/session-unread.ts
+index 80085918b2..fa186e11fb 100644
+--- a/apps/desktop/src/store/session-unread.ts
++++ b/apps/desktop/src/store/session-unread.ts
+@@ -371,6 +371,22 @@ export function isMessagingCompletion(storedSessionId: string, profile?: string)
+   return isMessagingSource(row ? row.source : polled)
+ }
+ 
++// Canonical Bot Chats have an authoritative reply poll. A generic busy→idle edge
++// has no turn provenance and must not relight them after a peer or routine turn.
++const rosterReplySessions = new Set<string>()
++
++export function noteRosterReplySession(storedId: string, profile: string): void {
++  rosterReplySessions.add(liveSourceKey(profile, storedId))
++
++  if (rosterReplySessions.size > 1024) {
++    rosterReplySessions.delete(rosterReplySessions.values().next().value!)
++  }
++}
++
++export function isRosterReplySession(storedId: string, profile?: string): boolean {
++  return rosterReplySessions.has(liveSourceKey(profile ?? $activeGatewayProfile.get(), storedId))
++}
++
+ /** UNREAD WRITER — the live busy→idle edge (session-states.ts) and any surface
+  *  that learns out-of-band that a session produced something the user hasn't
+  *  seen. Flags the transient atom (immediate paint) AND persists the marker so
+diff --git a/apps/shared/src/gateway-contract.generated.ts b/apps/shared/src/gateway-contract.generated.ts
+index fb0caee674..c6fbe1b65f 100644
+--- a/apps/shared/src/gateway-contract.generated.ts
++++ b/apps/shared/src/gateway-contract.generated.ts
+@@ -2096,6 +2096,8 @@ export interface ProfileCanonicalSession {
+   preview?: string
+   started_at?: number
+   last_active?: number
++  notification_at?: number
++  notification_preview?: string
+   message_count?: number
+   live_message_count?: number | null
+ }
+diff --git a/apps/shared/src/gateway-contract.openrpc.json b/apps/shared/src/gateway-contract.openrpc.json
+index 7942151d6c..4e17a27e98 100644
+--- a/apps/shared/src/gateway-contract.openrpc.json
++++ b/apps/shared/src/gateway-contract.openrpc.json
+@@ -29344,6 +29344,23 @@
+             "default": 0,
+             "title": "Last Active"
+           },
++          "notification_at": {
++            "anyOf": [
++              {
++                "type": "number"
++              },
++              {
++                "type": "integer"
++              }
++            ],
++            "default": 0,
++            "title": "Notification At"
++          },
++          "notification_preview": {
++            "default": "",
++            "title": "Notification Preview",
++            "type": "string"
++          },
+           "message_count": {
+             "default": 0,
+             "title": "Message Count",
+diff --git a/gateway/session_group_controls.py b/gateway/session_group_controls.py
+index e2281735fd..6a7a93e7ae 100644
+--- a/gateway/session_group_controls.py
++++ b/gateway/session_group_controls.py
+@@ -370,6 +370,9 @@ def _read_bot_sessions(db, subject, operator, bot_chat_route=None):
+         if worker:
+             fields['worker_session'] = {'id': worker['id'], 'source': (worker['source'] or '').strip().lower(),
+                                         'title': worker['title'] or '', 'last_active': worker['last_active'] or 0}
++        if fields['canonical_session']:
++            from tui_gateway.profile_notifications import latest_human_reply_on
++            fields['canonical_session'].update(latest_human_reply_on(conn, fields['canonical_session']['resolved_id']))
+     return fields
+ 
+ 
+diff --git a/tests/gateway/test_profiles_adopted_bot_chat.py b/tests/gateway/test_profiles_adopted_bot_chat.py
+index 730f76dc96..b14dcdbfbe 100644
+--- a/tests/gateway/test_profiles_adopted_bot_chat.py
++++ b/tests/gateway/test_profiles_adopted_bot_chat.py
+@@ -66,3 +66,35 @@ def test_unbound_native_chat_is_not_a_local_bot_chat(tmp_path, monkeypatch):
+         current = _profiles(authority, actor, tmp_path, {})['profiles'][0]
+         assert current['canonical_session']['id'] == 'local-current'
+         assert current['last_session']['id'] == 'local-current'
++
++
++def test_roster_notifies_only_for_human_replies(tmp_path, monkeypatch):
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
++    actor = Principal('owner', str(tmp_path), frozenset({'session:read', 'session:operator'}), 'fixture')
++    with SessionDB(tmp_path / 'state.db') as db:
++        db.create_session('chat', source='cli')
++        receipt = {'session_id': 'chat', 'legacy_session_id': 'chat', 'profile_id': str(tmp_path),
++                   'principal_id': actor.subject, 'route': 'agent:main:local:dm:chat',
++                   'entry': {'origin': {'platform': 'local', 'chat_id': 'chat', 'user_id': actor.subject}}}
++        with db._lock:
++            bind_legacy_target(db, db._conn, receipt)
++            db._conn.commit()
++        db.set_session_title('chat', 'Bot Chat')
++        db.set_session_hidden('chat', True)
++        db.append_message('chat', 'user', 'Human question', timestamp=10)
++        db.append_message('chat', 'assistant', 'Human answer', timestamp=20)
++        authority = SimpleNamespace(db=db, profile_id=str(tmp_path))
++        def notification():
++            from tui_gateway.profile_roster_cache import invalidate
++            invalidate()
++            return _profiles(authority, actor, tmp_path, {})['profiles'][0]['canonical_session']['notification_at']
++        assert notification() == 20
++        db.append_message('chat', 'user', 'Peer message', timestamp=30, display_kind='internal_notification')
++        db.append_message('chat', 'assistant', 'Peer reply', timestamp=40)
++        assert notification() == 20
++        db.append_message('chat', 'user', 'Prepared routine result', timestamp=50,
++                          display_kind='internal_notification', display_metadata={'context_record': True})
++        assert notification() == 20
++        db.append_message('chat', 'user', 'Another human question', timestamp=60)
++        db.append_message('chat', 'assistant', 'Another answer', timestamp=70)
++        assert notification() == 70
+diff --git a/tests/tui_gateway/test_profile_notifications.py b/tests/tui_gateway/test_profile_notifications.py
+new file mode 100644
+index 0000000000..2d163f7b58
+--- /dev/null
++++ b/tests/tui_gateway/test_profile_notifications.py
+@@ -0,0 +1,34 @@
++from hermes_state import SessionDB
++from tui_gateway.profile_notifications import latest_human_reply
++
++
++def test_internal_activity_does_not_replace_human_reply(tmp_path):
++    db = SessionDB(db_path=tmp_path / 'state.db')
++    db.create_session('chat', 'gui')
++    db.append_message('chat', 'user', 'Question', timestamp=1)
++    db.append_message('chat', 'assistant', 'Answer', timestamp=2)
++    expected = {'notification_at': 2, 'notification_preview': 'Answer'}
++    assert latest_human_reply(db, 'chat') == expected
++    for kind, text in [('internal_notification', 'Message from a bot'),
++                       ('internal_notification', 'Routine context'),
++                       (None, '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: ...')]:
++        db.append_message('chat', 'user', text, display_kind=kind, timestamp=3)
++        db.append_message('chat', 'assistant', 'Internal answer', timestamp=4)
++        assert latest_human_reply(db, 'chat') == expected
++    db.append_message('chat', 'user', 'Next human question', timestamp=5)
++    db.append_message('chat', 'assistant', 'New answer', timestamp=6)
++    assert latest_human_reply(db, 'chat')['notification_at'] == 6
++    db.close()
++
++
++def test_context_records_and_tools_do_not_notify_or_steal_human_turn(tmp_path):
++    db = SessionDB(db_path=tmp_path / 'state.db')
++    db.create_session('chat', 'gui')
++    db.append_message('chat', 'user', 'Question', timestamp=1)
++    db.append_message('chat', 'user', 'Routine', timestamp=2,
++                      display_kind='internal_notification', display_metadata={'context_record': True})
++    db.append_message('chat', 'assistant', '[SILENT]', timestamp=3)
++    assert latest_human_reply(db, 'chat')['notification_at'] == 0
++    db.append_message('chat', 'assistant', 'Answer', timestamp=4)
++    assert latest_human_reply(db, 'chat')['notification_at'] == 4
++    db.close()
+diff --git a/tui_gateway/contracts/profiles_vault_complete_foreign_subagents.py b/tui_gateway/contracts/profiles_vault_complete_foreign_subagents.py
+index 79519693dd..b60bec1f16 100644
+--- a/tui_gateway/contracts/profiles_vault_complete_foreign_subagents.py
++++ b/tui_gateway/contracts/profiles_vault_complete_foreign_subagents.py
+@@ -144,6 +144,8 @@ class ProfileCanonicalSession(Result):
+     preview: str = ""
+     started_at: float | int = 0
+     last_active: float | int = 0
++    notification_at: float | int = 0
++    notification_preview: str = ""
+     message_count: int = 0
+     live_message_count: int | None = None
+ 
+diff --git a/tui_gateway/methods_profiles.py b/tui_gateway/methods_profiles.py
+index 386f5c1070..eef52673c9 100644
+--- a/tui_gateway/methods_profiles.py
++++ b/tui_gateway/methods_profiles.py
+@@ -191,7 +191,8 @@ def _canonical_session_row(db, profile_path):
+             "title": tip_row.get("title") or "", "preview": _latest_message_preview(db, tip),
+             "started_at": tip_row.get("started_at") or started,
+             "last_active": tip_row.get("last_activity_at") or tip_row.get("started_at") or started,
+-            "message_count": tip_row.get("message_count") or 0, **_live_count_field(db, tip)}
++            "message_count": tip_row.get("message_count") or 0, **_live_count_field(db, tip),
++            **_lazy("tui_gateway.profile_notifications", "latest_human_reply")(db, tip)}
+     except Exception:
+         return None
+ 
+diff --git a/tui_gateway/profile_notifications.py b/tui_gateway/profile_notifications.py
+new file mode 100644
+index 0000000000..97041ccb44
+--- /dev/null
++++ b/tui_gateway/profile_notifications.py
+@@ -0,0 +1,42 @@
++"""Human reply evidence for the Bot Chat roster, independent of liveness timestamps."""
++import json
++
++from gateway.response_filters import is_intentional_silence_response
++
++
++def latest_human_reply(db, session_id):
++    """Return the latest visible assistant reply to a human turn in this transcript.
++
++    Internal prompts own their subsequent replies too. Detached context records are not
++    turn boundaries. No writes, inference, or content from a different conversation.
++    """
++    with db._read_ctx() as conn:
++        return latest_human_reply_on(conn, session_id)
++
++
++def latest_human_reply_on(conn, session_id):
++    """Use the caller's authorized, coherent read connection."""
++    rows = conn.execute(
++        "SELECT role, content, timestamp, display_kind, display_metadata, tool_calls "
++        "FROM messages WHERE session_id = ? AND active = 1 AND _compressed_summary = 0 "
++        "AND role IN ('user', 'assistant') ORDER BY id DESC", (session_id,)).fetchall()
++    candidate = None
++    for row in rows:
++        role, content, timestamp, kind, encoded, calls = row
++        metadata = json.loads(encoded) if encoded else {}
++        if metadata.get('model_only') or metadata.get('context_record') or metadata.get('completion_admission'):
++            continue
++        if role == 'assistant':
++            if candidate is None and not calls and not kind and isinstance(content, str) and content.strip():
++                if not is_intentional_silence_response(content):
++                    candidate = (timestamp, content)
++            continue
++        # Machinery is stamped by native admission. Legacy scheduler prompts predate that stamp.
++        human = kind in (None, '', 'steer') and not str(content or '').startswith(
++            '[IMPORTANT: You are running as a scheduled cron job.')
++        if human and candidate:
++            timestamp, content = candidate
++            preview = ' '.join(content.split())
++            return {'notification_at': timestamp, 'notification_preview': preview[:80]}
++        candidate = None
++    return {'notification_at': 0, 'notification_preview': ''}

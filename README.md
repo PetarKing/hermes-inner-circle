@@ -14,6 +14,7 @@ and more visually pleasing. Shared because it might be useful to someone else.
 - Large, edge-to-edge bot portraits; narrow the sidebar for icon-and-name rows.
 - Sage chat styling, compact headers, readable messages and a narrower composer.
 - Clear unread envelopes and current-bot selection, without shifting the cards.
+  Unread eligibility comes from Hermes; see the [native notification fix](docs/NOTIFICATIONS.md).
 - Native folders, local ordering and advancing activity ages. Sessions is hidden
   while the preset is enabled, with a command to bring it back.
 - Quiet thinking/tool display, a typing indicator and a task dock that starts
